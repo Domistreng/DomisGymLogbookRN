@@ -1,128 +1,223 @@
-import React, { useEffect, useState, useContext } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, Alert } from 'react-native';
+import React, { useState, useContext } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  Button,
+  StyleSheet,
+  Alert,
+  Keyboard,
+  TouchableWithoutFeedback,
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { UserContext } from '../userContext';  // Import the context
-
-interface User {
-  UserID: number;
-  Username: string;
-}
+import { UserContext } from '../userContext';
 
 const AUTH_STORAGE_KEY = 'loggedInUser';
 
-const AuthScreen: React.FC = () => {
-  const { user, setUser } = useContext(UserContext);  // Use context user state
-  const [username, setUsername] = useState<string>('Enter Username');
-  const [password, setPassword] = useState<string>('Enter Password');
-  const [loading, setLoading] = useState<boolean>(true);
+const LoginScreen: React.FC = () => {
+  const { soloUser, duoUsers, setSoloUser, setDuoUsers } = useContext(UserContext);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loggingInSecondUser, setLoggingInSecondUser] = useState(false);
 
-  // Load saved credentials on mount and auto-login
-  useEffect(() => {
-    async function loadStoredUser() {
-      try {
-        const stored = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
-        if (stored) {
-          const parsed: User & { password: string } = JSON.parse(stored);
-          setUsername(parsed.Username);
-          setPassword(parsed.password);
-          await login(parsed.Username, parsed.password, true);
-        }
-      } catch (err) {
-        console.warn('Failed to load stored user', err);
-      }
-      setLoading(false);
+  const handleLogin = async () => {
+    if (!username || !password) {
+      Alert.alert('Please enter username and password');
+      return;
     }
-    loadStoredUser();
-  }, []);
 
-  // Login handler
-  async function login(inputUsername: string, inputPassword: string, silent = false) {
     try {
-      const response = await fetch('http://5.161.204.169:3000/login', {
+      const res = await fetch('http://5.161.204.169:3000/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: inputUsername, password: inputPassword }),
+        body: JSON.stringify({ username, password }),
       });
-      const data = await response.json();
-      if (!response.ok) {
-        if (!silent) Alert.alert('Login failed', data.error || 'Unknown error');
-        setUser(null);
-        return false;
+      const data = await res.json();
+
+      if (data.error) {
+        Alert.alert(data.error);
+        return;
       }
-      
-      setUser({ UserID: data.UserID, Username: data.Username });
-      setUsername(data.Username);
-      setPassword(inputPassword);
-      // Store login info for auto-login next time
+
+      if (!loggingInSecondUser) {
+        if (duoUsers) setDuoUsers(null); // Clear duo mode on fresh solo login
+
+        setSoloUser({ UserID: data.UserID, Username: data.Username });
+
+        // Save soloUser to AsyncStorage
+        await AsyncStorage.setItem(
+          AUTH_STORAGE_KEY,
+          JSON.stringify({ soloUser: { UserID: data.UserID, Username: data.Username } })
+        );
+
+        Alert.alert(`Logged in as ${data.Username}`);
+        setUsername('');
+        setPassword('');
+      } else {
+        if (!soloUser) {
+          Alert.alert('You must login first as user 1 to add second user');
+          return;
+        }
+
+        if (data.UserID === soloUser.UserID) {
+          Alert.alert('This user is already logged in as User 1');
+          return;
+        }
+
+        const newDuoUsers = [soloUser, { UserID: data.UserID, Username: data.Username }];
+        setDuoUsers(newDuoUsers);
+        setSoloUser(null);
+        setLoggingInSecondUser(false);
+
+        // Save duoUsers to AsyncStorage
+        await AsyncStorage.setItem(
+          AUTH_STORAGE_KEY,
+          JSON.stringify({ duoUsers: newDuoUsers })
+        );
+
+        Alert.alert(`Duo mode activated with ${soloUser.Username} & ${data.Username}`);
+        setUsername('');
+        setPassword('');
+      }
+    } catch {
+      Alert.alert('Login failed');
+    }
+  };
+
+  const handleLogoutUser1 = async () => {
+    if (duoUsers) {
+      // Logging out user 1 keeps user 2 solo
+      setSoloUser(duoUsers[1]);
+      setDuoUsers(null);
       await AsyncStorage.setItem(
         AUTH_STORAGE_KEY,
-        JSON.stringify({ UserID: data.UserID, Username: data.Username, password: inputPassword })
+        JSON.stringify({ soloUser: duoUsers[1] })
       );
-      console.log('Login successful, user set:', data);
-      console.log('AuthScreen user:', user);
-
-      return true;
-    } catch (error) {
-      if (!silent) Alert.alert('Network error', 'Could not reach server');
-      setUser(null);
-      return false;
+    } else {
+      setSoloUser(null);
+      // Clear AsyncStorage on logout
+      await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
     }
-  }
+  };
 
-  // Logout handler
-  async function logout() {
-    setUser(null);
-    setPassword('');
-    await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
-  }
-
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <Text>Loading...</Text>
-      </View>
-    );
-  }
+  const handleLogoutUser2 = async () => {
+    if (duoUsers) {
+      // Logging out user 2 keeps user 1 solo
+      setSoloUser(duoUsers[0]);
+      setDuoUsers(null);
+      await AsyncStorage.setItem(
+        AUTH_STORAGE_KEY,
+        JSON.stringify({ soloUser: duoUsers[0] })
+      );
+    }
+  };
 
   return (
-    <View style={styles.container}>
-      {!user ? (
-        <>
-          <Text style={styles.label}>Username:</Text>
-          <TextInput
-            style={styles.input}
-            value={username}
-            onChangeText={setUsername}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <Text style={styles.label}>Password:</Text>
-          <TextInput style={styles.input} value={password} onChangeText={setPassword} secureTextEntry />
-          <Button title="Log In" onPress={() => login(username, password)} />
-        </>
-      ) : (
-        <>
-          <Text style={styles.welcome}>Welcome, {user.Username}!</Text>
-          <Button title="Log Out" onPress={logout} />
-        </>
-      )}
-    </View>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <View style={styles.container}>
+        <Text style={styles.title}>Gym Logger Login</Text>
+
+        {soloUser && !duoUsers && (
+          <>
+            <Text style={styles.loggedInText}>Logged in as {soloUser.Username}</Text>
+            {!loggingInSecondUser && (
+              <>
+                <Button
+                  title="Add Second User (Duo Mode)"
+                  onPress={() => setLoggingInSecondUser(true)}
+                />
+                <View style={{ height: 10 }} />
+                <Button title={`Logout ${soloUser.Username}`} onPress={handleLogoutUser1} />
+              </>
+            )}
+          </>
+        )}
+
+        {duoUsers && (
+          <>
+            <Text style={styles.loggedInText}>
+              Duo logged in as {duoUsers[0].Username} & {duoUsers[1].Username}
+            </Text>
+            <Button
+              title={`Logout ${duoUsers[0].Username}`}
+              onPress={handleLogoutUser1}
+            />
+            <View style={{ height: 10 }} />
+            <Button
+              title={`Logout ${duoUsers[1].Username}`}
+              onPress={handleLogoutUser2}
+            />
+          </>
+        )}
+
+        {(loggingInSecondUser || (!soloUser && !duoUsers)) && (
+          <>
+            <TextInput
+              style={styles.input}
+              onChangeText={setUsername}
+              placeholder="Username"
+              placeholderTextColor="#555"
+              value={username}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <TextInput
+              style={styles.input}
+              onChangeText={setPassword}
+              placeholder="Password"
+              placeholderTextColor="#555"
+              value={password}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Button
+              title={loggingInSecondUser ? 'Login as User 2' : 'Login'}
+              onPress={handleLogin}
+            />
+            {loggingInSecondUser && (
+              <Button
+                title="Cancel Duo Login"
+                onPress={() => setLoggingInSecondUser(false)}
+                color="red"
+              />
+            )}
+          </>
+        )}
+      </View>
+    </TouchableWithoutFeedback>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, justifyContent: 'center' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  label: { fontWeight: 'bold', marginTop: 10 },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    backgroundColor: '#908e8eff',
-    borderRadius: 4,
-    padding: 8,
-    marginTop: 5,
+  container: {
+    flex: 1,
+    padding: 20,
+    justifyContent: 'center',
+    backgroundColor: '#d3d3d3',
   },
-  welcome: { fontSize: 20, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  input: {
+    backgroundColor: '#fff',
+    marginBottom: 12,
+    borderRadius: 6,
+    borderColor: '#999',
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 16,
+  },
+  loggedInText: {
+    textAlign: 'center',
+    marginVertical: 10,
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });
 
-export default AuthScreen;
+export default LoginScreen;

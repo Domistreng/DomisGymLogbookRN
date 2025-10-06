@@ -20,16 +20,32 @@ interface WorkoutOption {
   value: string;
 }
 
-const WorkoutInputScreen: React.FC = () => {
-  const { user } = useContext(UserContext);
+interface WeightsReps {
+  WeightSet1: string;
+  WeightSet2: string;
+  WeightSet3: string;
+  RepsSet1: string;
+  RepsSet2: string;
+  RepsSet3: string;
+}
 
-  // Dropdown picker state
+const WorkoutInputScreen: React.FC = () => {
+  const { soloUser, duoUsers } = useContext(UserContext);
+
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState<string | null>(null);
   const [items, setItems] = useState<WorkoutOption[]>([]);
 
-  // Input state
-  const [weightsReps, setWeightsReps] = useState({
+  // Initialize reps+weight inputs for each user if duo, or single user if solo
+  const [inputs1, setInputs1] = useState<WeightsReps>({
+    WeightSet1: '',
+    WeightSet2: '',
+    WeightSet3: '',
+    RepsSet1: '',
+    RepsSet2: '',
+    RepsSet3: '',
+  });
+  const [inputs2, setInputs2] = useState<WeightsReps>({
     WeightSet1: '',
     WeightSet2: '',
     WeightSet3: '',
@@ -38,13 +54,21 @@ const WorkoutInputScreen: React.FC = () => {
     RepsSet3: '',
   });
 
+  const activeUser1 = duoUsers ? duoUsers[0] : soloUser;
+  const activeUser2 = duoUsers ? duoUsers[1] : null;
+
+  // Fetch workouts for day using either solo UserID or duo User1 UserID for dropdown.
   useEffect(() => {
-    if (!user) return;
-    // Fetch workouts for today's muscle group for dropdown
-    fetch(`http://5.161.204.169:3000/workouts_by_day/${user.UserID}`)
+    const userId = duoUsers ? duoUsers[0].UserID : soloUser?.UserID;
+    if (!userId) return;
+
+    fetch(`http://5.161.204.169:3000/workouts_by_day/${userId}`)
       .then((res) => res.json())
       .then((data: { WorkoutName: string }[]) => {
-        const converted = data.map((w) => ({ label: w.WorkoutName, value: w.WorkoutName }));
+        const converted = data.map((w) => ({
+          label: w.WorkoutName,
+          value: w.WorkoutName,
+        }));
         setItems(converted);
         if (converted.length > 0) {
           setValue(converted[0].value);
@@ -54,10 +78,18 @@ const WorkoutInputScreen: React.FC = () => {
         setItems([]);
         setValue(null);
       });
-  }, [user]);
+  }, [soloUser, duoUsers]);
 
-  const handleChange = (field: string, val: string) => {
-    setWeightsReps((prev) => ({ ...prev, [field]: val }));
+  const handleChange = (
+    userNumber: 1 | 2,
+    field: keyof WeightsReps,
+    val: string
+  ) => {
+    if (userNumber === 1) {
+      setInputs1((prev) => ({ ...prev, [field]: val }));
+    } else {
+      setInputs2((prev) => ({ ...prev, [field]: val }));
+    }
   };
 
   const handleSubmit = () => {
@@ -66,30 +98,78 @@ const WorkoutInputScreen: React.FC = () => {
       return;
     }
 
-    if (!user) {
+    if (!activeUser1) {
       Alert.alert('User not logged in');
       return;
     }
 
-    const payload = {
-      UserID: user.UserID, // Include for backend identification
-      WorkoutName: value,
-      WeightSet1: weightsReps.WeightSet1 ? Number(weightsReps.WeightSet1) : null,
-      RepsSet1: weightsReps.RepsSet1 ? Number(weightsReps.RepsSet1) : null,
-      WeightSet2: weightsReps.WeightSet2 ? Number(weightsReps.WeightSet2) : null,
-      RepsSet2: weightsReps.RepsSet2 ? Number(weightsReps.RepsSet2) : null,
-      WeightSet3: weightsReps.WeightSet3 ? Number(weightsReps.WeightSet3) : null,
-      RepsSet3: weightsReps.RepsSet3 ? Number(weightsReps.RepsSet3) : null,
+    // Helper to check if all inputs are blank for a user
+    const allInputsBlank = (inputs: WeightsReps) => {
+      return (
+        !inputs.WeightSet1 &&
+        !inputs.WeightSet2 &&
+        !inputs.WeightSet3 &&
+        !inputs.RepsSet1 &&
+        !inputs.RepsSet2 &&
+        !inputs.RepsSet3
+      );
     };
 
-    fetch(`http://5.161.204.169:3000/individual_workouts/${user.UserID}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
+    const payloads = [];
+
+    // Only add user1's payload if they entered any data
+    if (!allInputsBlank(inputs1)) {
+      payloads.push({
+        UserID: activeUser1.UserID,
+        WorkoutName: value,
+        WeightSet1: inputs1.WeightSet1 ? Number(inputs1.WeightSet1) : null,
+        RepsSet1: inputs1.RepsSet1 ? Number(inputs1.RepsSet1) : null,
+        WeightSet2: inputs1.WeightSet2 ? Number(inputs1.WeightSet2) : null,
+        RepsSet2: inputs1.RepsSet2 ? Number(inputs1.RepsSet2) : null,
+        WeightSet3: inputs1.WeightSet3 ? Number(inputs1.WeightSet3) : null,
+        RepsSet3: inputs1.RepsSet3 ? Number(inputs1.RepsSet3) : null,
+      });
+    }
+
+    // Only add user2's payload if present and they entered any data
+    if (activeUser2 && !allInputsBlank(inputs2)) {
+      payloads.push({
+        UserID: activeUser2.UserID,
+        WorkoutName: value,
+        WeightSet1: inputs2.WeightSet1 ? Number(inputs2.WeightSet1) : null,
+        RepsSet1: inputs2.RepsSet1 ? Number(inputs2.RepsSet1) : null,
+        WeightSet2: inputs2.WeightSet2 ? Number(inputs2.WeightSet2) : null,
+        RepsSet2: inputs2.RepsSet2 ? Number(inputs2.RepsSet2) : null,
+        WeightSet3: inputs2.WeightSet3 ? Number(inputs2.WeightSet3) : null,
+        RepsSet3: inputs2.RepsSet3 ? Number(inputs2.RepsSet3) : null,
+      });
+    }
+
+    if (payloads.length === 0) {
+      Alert.alert('Please enter at least one field of data for a user before submitting.');
+      return;
+    }
+
+    Promise.all(
+      payloads.map((payload) =>
+        fetch(`http://5.161.204.169:3000/individual_workouts/${payload.UserID}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      )
+    )
       .then(() => {
-        Alert.alert('Workout log added!');
-        setWeightsReps({
+        Alert.alert('Workout log(s) added!');
+        setInputs1({
+          WeightSet1: '',
+          WeightSet2: '',
+          WeightSet3: '',
+          RepsSet1: '',
+          RepsSet2: '',
+          RepsSet3: '',
+        });
+        setInputs2({
           WeightSet1: '',
           WeightSet2: '',
           WeightSet3: '',
@@ -98,15 +178,41 @@ const WorkoutInputScreen: React.FC = () => {
           RepsSet3: '',
         });
       })
-      .catch(() => Alert.alert('Failed to add workout log'));
+      .catch(() => Alert.alert('Failed to add workout log(s)'));
+  };
+
+
+  const renderInputRow = (
+    userNumber: 1 | 2,
+    label: string,
+    keys: (keyof WeightsReps)[]
+  ) => {
+    const inputs = userNumber === 1 ? inputs1 : inputs2;
+    return (
+      <>
+        <Text style={styles.rowLabel}>{label}</Text>
+        <View style={styles.row}>
+          {keys.map((key) => (
+            <TextInput
+              key={key}
+              style={styles.inputSmall}
+              keyboardType="numeric"
+              placeholder="0"
+              value={inputs[key]}
+              onChangeText={(text) => handleChange(userNumber, key, text)}
+            />
+          ))}
+        </View>
+      </>
+    );
   };
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <SafeAreaView style={styles.container}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <View style={{ flexGrow: 1, padding: 10 }}>
             <Text style={styles.sectionTitle}>Select Workout</Text>
@@ -123,33 +229,29 @@ const WorkoutInputScreen: React.FC = () => {
               textStyle={{ color: '#000', fontWeight: '500' }}
             />
 
-            <Text style={styles.rowLabel}>Reps</Text>
-            <View style={styles.row}>
-              {['RepsSet1', 'RepsSet2', 'RepsSet3'].map((key) => (
-                <TextInput
-                  key={key}
-                  style={styles.inputSmall}
-                  keyboardType="numeric"
-                  placeholder="0"
-                  value={(weightsReps as any)[key]}
-                  onChangeText={(text) => handleChange(key, text)}
-                />
-              ))}
-            </View>
+            {activeUser1 && (
+              <>
+                <Text style={styles.duoLabel}>{activeUser1.Username}</Text>
+                {renderInputRow(1, 'Reps', ['RepsSet1', 'RepsSet2', 'RepsSet3'])}
+                {renderInputRow(1, 'Weight (kg)', [
+                  'WeightSet1',
+                  'WeightSet2',
+                  'WeightSet3',
+                ])}
+              </>
+            )}
 
-            <Text style={styles.rowLabel}>Weight (kg)</Text>
-            <View style={styles.row}>
-              {['WeightSet1', 'WeightSet2', 'WeightSet3'].map((key) => (
-                <TextInput
-                  key={key}
-                  style={styles.inputSmall}
-                  keyboardType="numeric"
-                  placeholder="0"
-                  value={(weightsReps as any)[key]}
-                  onChangeText={(text) => handleChange(key, text)}
-                />
-              ))}
-            </View>
+            {activeUser2 && (
+              <>
+                <Text style={styles.duoLabel}>{activeUser2.Username}</Text>
+                {renderInputRow(2, 'Reps', ['RepsSet1', 'RepsSet2', 'RepsSet3'])}
+                {renderInputRow(2, 'Weight (kg)', [
+                  'WeightSet1',
+                  'WeightSet2',
+                  'WeightSet3',
+                ])}
+              </>
+            )}
 
             <Button title="Add Workout Log" onPress={handleSubmit} />
           </View>
@@ -170,6 +272,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 20,
     marginBottom: 12,
+  },
+  duoLabel: {
+    fontWeight: '700',
+    fontSize: 18,
+    textAlign: 'center',
+    marginBottom: 8,
   },
   rowLabel: {
     fontWeight: '600',

@@ -1,12 +1,12 @@
 import React, { useEffect, useContext } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { UserContext } from '../userContext'; // Import using your relative path
+import { UserContext } from '../userContext';
 
-const AUTH_STORAGE_KEY = 'loggedInUser';
+const AUTH_STORAGE_KEY = 'loggedInUser'; // You might want separate keys for solo and duo
 
 const HomePage: React.FC = () => {
-  const { user, setUser } = useContext(UserContext);
+  const { soloUser, duoUsers, setSoloUser, setDuoUsers } = useContext(UserContext);
   const [loading, setLoading] = React.useState(true);
 
   useEffect(() => {
@@ -15,9 +15,14 @@ const HomePage: React.FC = () => {
         const stored = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
-          // If you want, verify credentials with your server here
-          // For now, directly set the user context
-          setUser({ UserID: parsed.UserID, Username: parsed.Username });
+          // Determine if saved data is solo or duo
+          if (parsed.duoUsers && Array.isArray(parsed.duoUsers) && parsed.duoUsers.length === 2) {
+            setDuoUsers(parsed.duoUsers);
+            setSoloUser(null);
+          } else if (parsed.soloUser) {
+            setSoloUser(parsed.soloUser);
+            setDuoUsers(null);
+          }
         }
       } catch (err) {
         console.warn('Failed to restore user:', err);
@@ -25,7 +30,7 @@ const HomePage: React.FC = () => {
       setLoading(false);
     }
     tryRestoreUser();
-  }, []);
+  }, [setSoloUser, setDuoUsers]);
 
   if (loading) {
     return (
@@ -39,7 +44,16 @@ const HomePage: React.FC = () => {
     <View style={styles.container}>
       <Text style={styles.title}>Gym Logbook App</Text>
       <Text style={styles.subtitle}>Created by Dominic Sitto</Text>
-      {user && <Text style={styles.welcome}>Welcome back, {user.Username}!</Text>}
+
+      {duoUsers ? (
+        <Text style={styles.welcome}>
+          Welcome back, {duoUsers[0].Username} & {duoUsers[1].Username}!
+        </Text>
+      ) : soloUser ? (
+        <Text style={styles.welcome}>Welcome back, {soloUser.Username}!</Text>
+      ) : (
+        <Text style={styles.welcome}>Please log in to get started.</Text>
+      )}
     </View>
   );
 };
@@ -49,7 +63,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   title: { fontSize: 32, fontWeight: 'bold', marginBottom: 12 },
   subtitle: { fontSize: 18, color: '#555' },
-  welcome: { marginTop: 20, fontSize: 20, fontWeight: 'bold' },
+  welcome: { marginTop: 20, fontSize: 20, fontWeight: 'bold', textAlign: 'center' },
 });
 
 export default HomePage;
